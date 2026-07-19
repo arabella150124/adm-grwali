@@ -138,6 +138,11 @@
                        <button onclick="toggleSidebar()" class="p-2.5 bg-slate-50 rounded-xl text-slate-600 hover:bg-slate-100 transition-all"><i data-lucide="menu" class="w-6 h-6"></i></button>
                        <h2 id="tab-title" class="text-xl lg:text-2xl font-black text-slate-800 tracking-tight uppercase">Dashboard</h2>
                    </div>
+                   <!-- Connection Status Badge -->
+                   <div id="conn-badge" class="flex items-center gap-2 px-4 py-2 rounded-full border text-[10px] font-extrabold uppercase tracking-wider transition-all duration-300">
+                       <span class="w-2.5 h-2.5 rounded-full animate-pulse inline-block" id="conn-dot"></span>
+                       <span id="conn-text">Checking Connection</span>
+                   </div>
                </header>
                <main class="p-4 lg:p-10 flex-1 pb-24 lg:pb-10">
                    <div id="tab-content" class="animate__animated animate__fadeIn animate__faster"></div>
@@ -148,12 +153,37 @@
    
    <script>
        // --- SYSTEM CONFIG ---
-       const GAS_URL = "https://script.google.com/macros/s/AKfycbzvxPQCpRUch0bHgMOm5vWGAtWI-nb_z3iklJq50hXjwUYxreJuET8ZE-I_py_2--AT/exec";
+       const GAS_URL = "https://script.google.com/macros/s/AKfycbyBbREt6unzEBS19hGtBtk8mWkIof6Puof_X4v7ZGRcTesuSX5-fXu6yUGukSX7_po3/exec";
        
-       // --- DATA STATE ---
+       // --- DATA STATE & OFFLINE PERSISTENCE INITIALIZER ---
        let db = { Kelas: [], Siswa: [], Nilai: [], Jurnal: [], Absen: [], Bimbingan: [], Settings: [], Jadwal: [] };
+       let isOnline = false;
        let currentUser = null;
        let isSidebarOpen = true;
+
+       // Load local simulated database on first run
+       function loadOfflineDatabase() {
+           const localData = localStorage.getItem('teacher_admin_local_db_v53');
+           if (localData) {
+               db = JSON.parse(localData);
+           } else {
+               db = {
+                   Kelas: [{id: "K-1", nama_kelas: "XII-RPL-1"}, {id: "K-2", nama_kelas: "XII-TKJ-2"}],
+                   Siswa: [{id: "S-1", nis: "2025001", nama: "Ahmad Dahlan", jk: "L", kelas: "XII-RPL-1", is_bimbingan: "Ya"}],
+                   Absen: [],
+                   Nilai: [],
+                   Jurnal: [],
+                   Bimbingan: [],
+                   Settings: [{key: 'nama_sekolah', value: 'SMK NEGERI PRESTASI GURU (DEMO)'}, {key: 'alamat', value: 'Jl. Pendidikan No. 45 Jakarta'}],
+                   Jadwal: [{id: "J-1", hari: 'Senin', jam: '07:30 - 09:00', kelas: 'XII-RPL-1', mapel: 'Pemrograman Web'}]
+               };
+               saveOfflineDatabase();
+           }
+       }
+       
+       function saveOfflineDatabase() {
+           localStorage.setItem('teacher_admin_local_db_v53', JSON.stringify(db));
+       }
 
        // --- PWA SUPPORT ---
        let deferredPrompt;
@@ -175,85 +205,142 @@
            }
        });
 
-       // --- STREAMING_CHUNK: Setting up Unified API Connector... ---
-       // --- UNIFIED API CONNECTOR WITH HYBRID FALLBACK ---
-       function executeAPI(action, payload, successHandler) {
-           startLoading();
-           
-           // If running outside native Google Apps Script iframe environment (e.g., Blogger or local)
-           if (typeof google === 'undefined' || !google.script || !google.script.run) {
-               // Fallback to local simulator if no valid GAS_URL is set
-               if (GAS_URL === "" || GAS_URL.includes("YOUR_GAS_URL") || window.location.hostname === "localhost" && !GAS_URL) {
-                   simulateLocalDatabase(action, payload, (res) => {
-                       endLoading();
-                       successHandler(res);
-                   });
-                   return;
-               }
+       // --- STREAMING_CHUNK: Setting up Unified API Connector with 3-Second Abort Timeout... ---
+       function updateConnectionBadge(online) {
+           isOnline = online;
+           const badge = document.getElementById('conn-badge');
+           const dot = document.getElementById('conn-dot');
+           const text = document.getElementById('conn-text');
+           if (!badge) return;
 
-               // Execute CORS Post request to Google Apps Script
-               fetch(GAS_URL, {
-                   method: "POST",
-                   mode: "cors",
-                   headers: { "Content-Type": "text/plain" },
-                   body: JSON.stringify({ action: action, payload: payload })
-               })
-               .then(res => {
-                   if (!res.ok) throw new Error("Network response was not ok");
-                   return res.json();
-               })
-               .then(res => {
-                   endLoading();
-                   successHandler(res);
-               })
-               .catch(err => {
-                   endLoading();
-                   console.error("API Fetch Failure, using Local Mock Database:", err);
-                   // Smooth failover: trigger simulated local database
-                   simulateLocalDatabase(action, payload, (res) => {
-                       Swal.fire({
-                           icon: 'warning',
-                           title: 'Dialihkan Ke Simulator Lokal',
-                           text: 'Koneksi ke backend bermasalah. Menggunakan database demonstrasi offline.',
-                           toast: true,
-                           position: 'top-end',
-                           showConfirmButton: false,
-                           timer: 3500
-                       });
-                       successHandler(res);
-                   });
-               });
+           if (online) {
+               badge.className = "flex items-center gap-2 px-4 py-2 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 text-[10px] font-extrabold uppercase tracking-wider";
+               dot.className = "w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse inline-block";
+               text.innerText = "Mode: Cloud Online";
            } else {
-               // Execute directly inside Google Apps Script iframe environment
-               google.script.run.withSuccessHandler((res) => {
-                   endLoading();
-                   successHandler(res);
-               })[action](payload);
+               badge.className = "flex items-center gap-2 px-4 py-2 rounded-full border border-amber-200 bg-amber-50 text-amber-700 text-[10px] font-extrabold uppercase tracking-wider";
+               dot.className = "w-2.5 h-2.5 rounded-full bg-amber-500 inline-block";
+               text.innerText = "Mode: Demo Offline";
            }
        }
 
-       // --- STREAMING_CHUNK: Initializing Local Mock Database... ---
-       // --- LOCAL DEMONSTRATION ENGINE (MOCK DB) ---
-       function simulateLocalDatabase(action, payload, successHandler) {
-           if (action === "getAllData") {
-               successHandler({
-                   Kelas: db.Kelas.length ? db.Kelas : [{id: "K-1", nama_kelas: "XII-RPL-1"}, {id: "K-2", nama_kelas: "XII-TKJ-2"}],
-                   Siswa: db.Siswa.length ? db.Siswa : [{id: "S-1", nis: "2025001", nama: "Ahmad Dahlan", jk: "L", kelas: "XII-RPL-1", is_bimbingan: "Ya"}],
-                   Absen: db.Absen || [],
-                   Nilai: db.Nilai || [],
-                   Jurnal: db.Jurnal || [],
-                   Bimbingan: db.Bimbingan || [],
-                   Settings: db.Settings.length ? db.Settings : [{key: 'nama_sekolah', value: 'SMK NEGERI PRESTASI GURU'}, {key: 'alamat', value: 'Jl. Pendidikan No. 45 Jakarta'}],
-                   Jadwal: db.Jadwal.length ? db.Jadwal : [{hari: 'Senin', jam: '07:30 - 09:00', kelas: 'XII-RPL-1', mapel: 'Pemrograman Web'}]
+       // --- STREAMING_CHUNK: Integrating Fallback Abort Logic... ---
+       function executeAPI(action, payload, successHandler) {
+           startLoading();
+           
+           // If running directly inside the GAS iFrame
+           if (typeof google !== 'undefined' && google.script && google.script.run) {
+               google.script.run.withSuccessHandler((res) => {
+                   updateConnectionBadge(true);
+                   endLoading();
+                   successHandler(res);
+               }).withFailureHandler((err) => {
+                   endLoading();
+                   switchToLocalFallback(action, payload, successHandler, "Koneksi Google Script Gagal");
+               })[action](payload);
+               return;
+           }
+
+           // Check if GAS URL is not set
+           if (GAS_URL === "" || GAS_URL.includes("YOUR_GAS_URL")) {
+               switchToLocalFallback(action, payload, successHandler, "Backend URL belum diatur");
+               return;
+           }
+
+           // Smart Fast-Fail Connection Guard (Abort after 3.5 seconds)
+           const controller = new AbortController();
+           const timeoutId = setTimeout(() => controller.abort(), 3500);
+
+           fetch(GAS_URL, {
+               method: "POST",
+               mode: "cors",
+               headers: { "Content-Type": "text/plain" },
+               body: JSON.stringify({ action: action, payload: payload }),
+               signal: controller.signal
+           })
+           .then(res => {
+               clearTimeout(timeoutId);
+               if (!res.ok) throw new Error("Network response error");
+               return res.json();
+           })
+           .then(res => {
+               updateConnectionBadge(true);
+               endLoading();
+               successHandler(res);
+           })
+           .catch(err => {
+               clearTimeout(timeoutId);
+               endLoading();
+               switchToLocalFallback(action, payload, successHandler, err.name === 'AbortError' ? 'Koneksi Timeout (3.5 Detik)' : 'Backend Tidak Merespon');
+           });
+       }
+
+       function switchToLocalFallback(action, payload, successHandler, reason) {
+           updateConnectionBadge(false);
+           console.warn(`Fallback triggered: ${reason}. Running mock database operation.`);
+           
+           // Toast alert for developer warning (only once or non-obtrusively)
+           if (action === "getAllData" || action === "loginUser") {
+               Swal.fire({
+                   icon: 'warning',
+                   title: 'Dialihkan Ke Simulator Lokal',
+                   text: `${reason}. Menggunakan database demonstrasi offline cepat.`,
+                   toast: true,
+                   position: 'top-end',
+                   showConfirmButton: false,
+                   timer: 3500
                });
+           }
+           
+           simulateLocalDatabase(action, payload, successHandler);
+       }
+
+       // --- STREAMING_CHUNK: Initializing Local Mock Database with memory storage... ---
+       function simulateLocalDatabase(action, payload, successHandler) {
+           loadOfflineDatabase(); // Ensure we have the latest state from localStorage
+           
+           if (action === "getAllData") {
+               successHandler(db);
            } else if (action === "loginUser") {
+               // Supports standard offline default credentials
                if ((payload.username === 'admin' && payload.password === 'sarjanasoft') || (payload.username === 'admin' && payload.password === 'AdminGuru2025!')) {
-                   successHandler({ success: true, user: { username: "admin", nama: "Administrator Pro (Demo)", role: "Admin" } });
+                   successHandler({ success: true, user: { username: "admin", nama: "Administrator Pro (Demo Offline)", role: "Admin" } });
                } else {
-                   successHandler({ success: false, message: 'Kredensial simulasi tidak valid!' });
+                   successHandler({ success: false, message: 'Kredensial simulasi tidak valid! Silakan gunakan sandi sarjanasoft atau AdminGuru2025!' });
                }
            } else if (action === "getData" && payload === "Settings") {
-               successHandler(db.Settings.length ? db.Settings : [{key: 'nama_sekolah', value: 'SMK NEGERI PRESTASI GURU'}]);
+               successHandler(db.Settings);
+           } else if (action === "saveSettings") {
+               for (let key in payload) {
+                   let found = db.Settings.find(s => s.key === key);
+                   if (found) found.value = payload[key];
+                   else db.Settings.push({ key: key, value: payload[key] });
+               }
+               saveOfflineDatabase();
+               successHandler({ success: true });
+           } else if (action === "saveData") {
+               const sheet = payload.sheetName;
+               const item = payload.obj;
+               if (!item.id) item.id = "ID-" + new Date().getTime();
+               db[sheet].unshift(item);
+               saveOfflineDatabase();
+               successHandler({ success: true });
+           } else if (action === "saveBulkAbsen") {
+               payload.forEach(a => {
+                   if (!a.id) a.id = "ABS-" + new Date().getTime() + "-" + Math.floor(Math.random() * 100);
+                   db.Absen.unshift(a);
+               });
+               saveOfflineDatabase();
+               successHandler({ success: true });
+           } else if (action === "saveBulkNilai") {
+               payload.forEach(n => {
+                   const id = "NIL-" + new Date().getTime() + "-" + Math.floor(Math.random() * 1000);
+                   n.id = id;
+                   n.tanggal = new Date().toISOString().split('T')[0];
+                   db.Nilai.unshift(n);
+               });
+               saveOfflineDatabase();
+               successHandler({ success: true });
            } else {
                successHandler({ success: true });
            }
@@ -278,8 +365,8 @@
        }
 
        // --- STREAMING_CHUNK: Implementing Authentication Check... ---
-       // --- SYSTEM AUTHENTICATION & CORE INIT ---
        window.onload = () => {
+           loadOfflineDatabase();
            lucide.createIcons();
            checkLogin();
        };
@@ -384,7 +471,6 @@
        }
        
        // --- STREAMING_CHUNK: Implementing Custom Tab Rendering Engine... ---
-       // --- DYNAMIC RENDERING ENGINE ---
        function renderTab(tab, sub) {
            const container = document.getElementById('tab-content');
            let html = '';
@@ -511,7 +597,6 @@
        }
        
        // --- STREAMING_CHUNK: Processing Module Logics... ---
-       // --- SYSTEM MODULE LOGICS ---
        function updateMapelOptions() {
            const cls = document.getElementById('nil-kelas').value;
            const selectMapel = document.getElementById('nil-mapel');
@@ -763,7 +848,6 @@
        }
        
        // --- STREAMING_CHUNK: Managing Print Layout Engine... ---
-       // --- MASTER PRINTING ENGINE ---
        function generateMasterPrint(title, tableHtml) {
            const logo = getSettingValue('logo_url') || '';
            const school = getSettingValue('nama_sekolah');
